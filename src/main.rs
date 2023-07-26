@@ -1,50 +1,24 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use color_eyre::eyre::Result;
 
 use rsql::*;
 
-pub type Columns = Vec<String>;
-pub type Rows = Vec<String>;
-pub type Table = Vec<Rows>;
+fn main() -> Result<()> {
+    let mut v = vec![];
+    let mut cv = vec![];
 
-fn main() {
-    let sql = "SELECT id, name FROM users";
+    let tables = load_db(&mut v)?;
+    let columns = load_columns(&mut cv)?;
 
-    let res = parse_sql(sql);
+    // let (tables, columns) = load_data();
 
-    let mut users = BTreeMap::default();
+    repl(&tables, &columns)?;
 
-    users.insert(1, vec!["1", "Joe", "25"]);
-    users.insert(2, vec!["2", "Jim", "30"]);
-    users.insert(3, vec!["3", "Bob", "35"]);
+    println!("Shutting down.");
 
-    let mut tables: HashMap<String, BTreeMap<i32, Vec<&str>>> = HashMap::default();
+    save_to_disk("columns.db", &columns)?;
+    save_to_disk("data.db", &tables)?;
 
-    tables.insert("users".to_string(), users);
+    println!("Successfully saved data to disk.");
 
-    let mut columns: HashMap<&str, Vec<&str>> = HashMap::default();
-    columns.insert("users", vec!["id", "name", "age"]);
-
-    match res {
-        SqlQuery::Select(targets, table) => match targets {
-            Fields::All => {
-                if let Some(res) = tables.get(&table) {
-                    println!("{:?}", res);
-                }
-            }
-            Fields::Columns(columns) => {
-                let column_indicies: HashSet<_> = columns.iter().enumerate().map(|c| c.0).collect();
-
-                if let Some(res) = tables.get(&table) {
-                    for value in res.values() {
-                        for (index, val) in value.iter().enumerate() {
-                            if column_indicies.contains(&index) {
-                                print!("{} ", val);
-                            }
-                        }
-                        println!();
-                    }
-                }
-            }
-        },
-    }
+    Ok(())
 }
