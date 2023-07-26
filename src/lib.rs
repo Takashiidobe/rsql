@@ -33,6 +33,7 @@ pub fn parse_sql(sql: &str) -> SqlQuery {
 
     let mut targets = Fields::default();
     let mut table = Table::default();
+    let mut fields = vec![];
 
     let ast = Parser::parse_sql(&dialect, sql).unwrap();
     match ast.first().unwrap() {
@@ -66,9 +67,12 @@ pub fn parse_sql(sql: &str) -> SqlQuery {
                     }
                     for projection in projections {
                         match projection {
-                            SelectItem::UnnamedExpr(u) => {
-                                dbg!(u);
-                            }
+                            SelectItem::UnnamedExpr(identifier) => match identifier {
+                                sqlparser::ast::Expr::Identifier(Ident { value, .. }) => {
+                                    fields.push(value);
+                                }
+                                _ => todo!(),
+                            },
                             SelectItem::ExprWithAlias { expr, alias } => {
                                 dbg!(expr, alias);
                             }
@@ -101,5 +105,9 @@ pub fn parse_sql(sql: &str) -> SqlQuery {
         _ => todo!(),
     }
 
-    SqlQuery::Select(targets, table)
+    if !fields.is_empty() {
+        SqlQuery::Select(Fields::Columns(fields), table)
+    } else {
+        SqlQuery::Select(targets, table)
+    }
 }
