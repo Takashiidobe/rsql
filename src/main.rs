@@ -3,13 +3,13 @@ use color_eyre::eyre::Result;
 use rsql::*;
 
 fn main() -> Result<()> {
-    let mut v = vec![];
-    let mut cv = vec![];
+    // let mut v = vec![];
+    // let mut cv = vec![];
 
-    let tables = load_db(&mut v)?;
-    let columns = load_columns(&mut cv)?;
+    // let tables = load_db(&mut v)?;
+    // let columns = load_columns(&mut cv)?;
 
-    // let (tables, columns) = load_data();
+    let (tables, columns) = load_data();
 
     repl(&tables, &columns)?;
 

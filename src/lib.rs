@@ -15,7 +15,7 @@ use std::io::prelude::*;
 pub type TableName = String;
 pub type QueryResult = Vec<Vec<SqlDataType>>;
 pub type Columns = HashMap<String, Vec<String>>;
-pub type Tables = HashMap<String, BTreeMap<i32, Vec<SqlDataType>>>;
+pub type Tables = HashMap<String, BTreeMap<usize, Vec<SqlDataType>>>;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum SqlDataType {
@@ -82,14 +82,32 @@ pub enum Fields {
     Columns(Vec<String>),
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum Op {
+    #[default]
+    Eq,
+    Gt,
+    GtEq,
+    NotEq,
+    Lt,
+    LtEq,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum WhereExpr {
+    #[default]
+    None,
+    Some(String, Op, usize),
+}
+
 #[derive(Debug)]
 pub enum SqlQuery {
-    Select(Fields, TableName),
+    Select(Fields, TableName, WhereExpr),
 }
 
 impl Default for SqlQuery {
     fn default() -> Self {
-        Self::Select(Fields::default(), String::default())
+        Self::Select(Fields::default(), String::default(), WhereExpr::default())
     }
 }
 
@@ -97,18 +115,46 @@ pub fn get_result(res: SqlQuery, tables: &Tables, columns: &Columns) -> (Vec<Str
     let mut result = vec![];
     let mut fetched_columns = vec![];
     match res {
-        SqlQuery::Select(targets, table) => match targets {
+        SqlQuery::Select(targets, table, where_expr) => match targets {
             Fields::All => {
                 if let Some(res) = tables.get(&table) {
-                    let values: Vec<_> = res
-                        .values()
-                        .map(|x| x.iter().map(|x| x.to_owned()).collect())
-                        .collect();
-                    result = values;
                     fetched_columns = columns
                         .get(&table)
                         .expect("column did not exist on table")
                         .to_owned();
+                    result = match where_expr {
+                        WhereExpr::Some(ident, op, sqldata) => {
+                            let x = 0;
+                            let res = match op {
+                                Op::Eq => vec![res.get(&sqldata).unwrap().to_owned()],
+                                Op::Gt => res
+                                    .range(sqldata.saturating_add(1)..)
+                                    .map(|c| c.1.to_owned())
+                                    .collect(),
+                                Op::Lt => res.range(..sqldata).map(|c| c.1.to_owned()).collect(),
+                                Op::GtEq => res.range(sqldata..).map(|c| c.1.to_owned()).collect(),
+                                Op::LtEq => res.range(..=sqldata).map(|c| c.1.to_owned()).collect(),
+                                Op::NotEq => res
+                                    .iter()
+                                    .filter_map(|(i, c)| {
+                                        if *i != sqldata {
+                                            Some(c.to_owned())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect(),
+                            };
+
+                            res
+                        }
+                        WhereExpr::None => {
+                            let x = 0;
+                            res.values()
+                                .map(|x| x.iter().map(|x| x.to_owned()).collect())
+                                .collect()
+                        }
+                    }
                 }
             }
             Fields::Columns(column) => {
@@ -169,6 +215,7 @@ pub fn parse_sql(sql: &str) -> Vec<SqlQuery> {
     for node in ast {
         let mut targets = Fields::default();
         let mut table = TableName::default();
+        let mut where_expr = WhereExpr::None;
         let mut fields = vec![];
         match node {
             Statement::Query(query) => {
@@ -177,16 +224,38 @@ pub fn parse_sql(sql: &str) -> Vec<SqlQuery> {
                     SetExpr::Select(s) => {
                         let projections = s.projection;
                         let from = s.from;
-                        // Implement Between, i.e. select * from table where id
-                        // > 5;
                         if let Some(selection) = s.selection {
                             match selection {
-                                ast::Expr::Between {
-                                    expr,
-                                    negated,
-                                    low,
-                                    high,
-                                } => {}
+                                ast::Expr::BinaryOp { left, op, right } => {
+                                    let op = match op {
+                                        ast::BinaryOperator::Gt => Op::Gt,
+                                        ast::BinaryOperator::Lt => Op::Lt,
+                                        ast::BinaryOperator::GtEq => Op::GtEq,
+                                        ast::BinaryOperator::LtEq => Op::LtEq,
+                                        ast::BinaryOperator::Eq => Op::Eq,
+                                        ast::BinaryOperator::NotEq => Op::NotEq,
+                                        _ => todo!(),
+                                    };
+                                    let left = match *left {
+                                        ast::Expr::Identifier(identifier) => {
+                                            if identifier.value != "id" {
+                                                panic!("Only id based comparisons are supported");
+                                            } else {
+                                                identifier.value
+                                            }
+                                        }
+                                        _ => todo!(),
+                                    };
+                                    let right = match *right {
+                                        ast::Expr::Value(value) => match value {
+                                            ast::Value::Number(s, b) => s.parse::<usize>().unwrap(),
+                                            _ => todo!(),
+                                        },
+                                        _ => todo!(),
+                                    };
+
+                                    where_expr = WhereExpr::Some(left, op, right);
+                                }
                                 _ => todo!(),
                             }
                         }
@@ -227,9 +296,9 @@ pub fn parse_sql(sql: &str) -> Vec<SqlQuery> {
         }
 
         if !fields.is_empty() {
-            result.push(SqlQuery::Select(Fields::Columns(fields), table))
+            result.push(SqlQuery::Select(Fields::Columns(fields), table, where_expr))
         } else {
-            result.push(SqlQuery::Select(targets, table))
+            result.push(SqlQuery::Select(targets, table, where_expr))
         }
     }
 
@@ -337,15 +406,15 @@ pub fn load_data() -> (Tables, Columns) {
 
     restaurants.insert(
         1,
-        vec![SqlDataType::from(1), SqlDataType::from("Soup Shack")],
+        vec![SqlDataType::from(1), SqlDataType::from("Burger King")],
     );
     restaurants.insert(
         2,
-        vec![SqlDataType::from(2), SqlDataType::from("Hei La Moon")],
+        vec![SqlDataType::from(2), SqlDataType::from("McDonalds")],
     );
     restaurants.insert(
         3,
-        vec![SqlDataType::from(3), SqlDataType::from("Maruichi Select")],
+        vec![SqlDataType::from(3), SqlDataType::from("Five Guys")],
     );
     restaurants.insert(
         4,
